@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 
@@ -28,6 +28,7 @@ namespace LiveCaptionsTranslator.models
             { "pt-BR", "pt-BR" },
             { "tr-TR", "tr-TR" },
             { "ar-SA", "ar-SA" },
+            { "vi-VN", "vi-VN" },
         };
 
         public event PropertyChangedEventHandler? PropertyChanged;
@@ -88,17 +89,6 @@ namespace LiveCaptionsTranslator.models
 
         private string apiUrl = "http://localhost:11434";
 
-        public int keep_alive = 600;
-        
-        public int Keep_alive
-        {
-            get => keep_alive;
-            set
-            {
-                keep_alive = value;
-                OnPropertyChanged("Keep_alive");
-            }
-        }
         public string ApiUrl
         {
             get => apiUrl;
@@ -175,27 +165,6 @@ namespace LiveCaptionsTranslator.models
         }
     }
 
-    public class LMStudioConfig : BaseLLMConfig
-    {
-        public class Response
-        {
-            public string model { get; set; }
-            public string output { get; set; }
-        }
-
-        private string apiUrl = "http://localhost:1234/api/v1";
-
-        public string ApiUrl
-        {
-            get => apiUrl;
-            set
-            {
-                apiUrl = value;
-                OnPropertyChanged("ApiUrl");
-            }
-        }
-    }
-
     public class DeepLConfig : TranslateAPIConfig
     {
         [JsonIgnore]
@@ -214,6 +183,7 @@ namespace LiveCaptionsTranslator.models
             { "pt-BR", "PT-BR" },
             { "tr-TR", "TR" },
             { "ar-SA", "AR" },
+            { "vi-VN", "VI" },
         };
 
         private string apiKey = "";
@@ -266,6 +236,7 @@ namespace LiveCaptionsTranslator.models
             { "pt-BR", "pt" },
             { "tr-TR", "tr" },
             { "ar-SA", "ar" },
+            { "vi-VN", "vi" },
         };
 
         private string appKey = "";
@@ -321,6 +292,7 @@ namespace LiveCaptionsTranslator.models
             { "pt-BR", "pt" },
             { "tr-TR", "tr" },
             { "ar-SA", "ar" },
+            { "vi-VN", "vi" },
         };
 
         private string apiKey = "";
@@ -394,6 +366,7 @@ namespace LiveCaptionsTranslator.models
             { "pt-BR", "pt" },
             { "tr-TR", "tr" },
             { "ar-SA", "ara" },
+            { "vi-VN", "vie" },
         };
 
         private string appId = "";
@@ -449,6 +422,7 @@ namespace LiveCaptionsTranslator.models
             { "pt-BR", "pt" },
             { "tr-TR", "tr" },
             { "ar-SA", "ar" },
+            { "vi-VN", "vi" },
         };
 
         private string apiKey = "";
