@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 
@@ -28,6 +28,8 @@ namespace LiveCaptionsTranslator.models
             { "pt-BR", "pt-BR" },
             { "tr-TR", "tr-TR" },
             { "ar-SA", "ar-SA" },
+            { "vn-EN", "vn-EN" },
+            { "vi-US", "vi-US" },
         };
 
         public event PropertyChangedEventHandler? PropertyChanged;
@@ -88,17 +90,6 @@ namespace LiveCaptionsTranslator.models
 
         private string apiUrl = "http://localhost:11434";
 
-        public int keep_alive = 600;
-        
-        public int Keep_alive
-        {
-            get => keep_alive;
-            set
-            {
-                keep_alive = value;
-                OnPropertyChanged("Keep_alive");
-            }
-        }
         public string ApiUrl
         {
             get => apiUrl;
@@ -171,27 +162,6 @@ namespace LiveCaptionsTranslator.models
             {
                 apiKey = value;
                 OnPropertyChanged();
-            }
-        }
-    }
-
-    public class LMStudioConfig : BaseLLMConfig
-    {
-        public class Response
-        {
-            public string model { get; set; }
-            public string output { get; set; }
-        }
-
-        private string apiUrl = "http://localhost:1234/api/v1";
-
-        public string ApiUrl
-        {
-            get => apiUrl;
-            set
-            {
-                apiUrl = value;
-                OnPropertyChanged("ApiUrl");
             }
         }
     }
