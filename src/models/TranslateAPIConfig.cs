@@ -28,8 +28,7 @@ namespace LiveCaptionsTranslator.models
             { "pt-BR", "pt-BR" },
             { "tr-TR", "tr-TR" },
             { "ar-SA", "ar-SA" },
-            { "vn-EN", "vn-EN" },
-            { "vi-US", "vi-US" },
+            { "vi-VN", "vi-VN" },
         };
 
         public event PropertyChangedEventHandler? PropertyChanged;
@@ -184,6 +183,7 @@ namespace LiveCaptionsTranslator.models
             { "pt-BR", "PT-BR" },
             { "tr-TR", "TR" },
             { "ar-SA", "AR" },
+            { "vi-VN", "VI" },
         };
 
         private string apiKey = "";
@@ -236,6 +236,7 @@ namespace LiveCaptionsTranslator.models
             { "pt-BR", "pt" },
             { "tr-TR", "tr" },
             { "ar-SA", "ar" },
+            { "vi-VN", "vi" },
         };
 
         private string appKey = "";
@@ -291,6 +292,7 @@ namespace LiveCaptionsTranslator.models
             { "pt-BR", "pt" },
             { "tr-TR", "tr" },
             { "ar-SA", "ar" },
+            { "vi-VN", "vi" },
         };
 
         private string apiKey = "";
@@ -364,6 +366,7 @@ namespace LiveCaptionsTranslator.models
             { "pt-BR", "pt" },
             { "tr-TR", "tr" },
             { "ar-SA", "ara" },
+            { "vi-VN", "vie" },
         };
 
         private string appId = "";
@@ -419,6 +422,7 @@ namespace LiveCaptionsTranslator.models
             { "pt-BR", "pt" },
             { "tr-TR", "tr" },
             { "ar-SA", "ar" },
+            { "vi-VN", "vi" },
         };
 
         private string apiKey = "";
