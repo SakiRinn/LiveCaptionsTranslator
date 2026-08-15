@@ -72,6 +72,7 @@ Windows' built-in LiveCaptions is easy to use, uses few resources, and has extre
   | [Ollama](https://ollama.com)                        | LLM-based   | Self-hosted |
   | OpenAI Compatible API                               | LLM-based   | Online      |
   | [OpenRouter](https://openrouter.ai)                 | LLM-based   | Online      |
+  | [OrcaRouter](https://www.orcarouter.ai)             | LLM-based   | Online      |
   | Google Translate                                    | Traditional | Online      |
   | DeepL                                               | Traditional | Online      |
   | Youdao                                              | Traditional | Online      |

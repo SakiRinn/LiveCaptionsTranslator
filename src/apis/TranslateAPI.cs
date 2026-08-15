@@ -26,6 +26,7 @@ namespace LiveCaptionsTranslator.apis
             { "LMStudio", LMStudio },
             { "DeepL", DeepL },
             { "OpenRouter", OpenRouter },
+            { "OrcaRouter", OrcaRouter },
             { "Youdao", Youdao },
             { "MTranServer", MTranServer },
             { "Baidu", Baidu },
@@ -33,7 +34,7 @@ namespace LiveCaptionsTranslator.apis
         };
         public static readonly List<string> LLM_BASED_APIS = new()
         {
-            "Ollama", "OpenAI", "OpenRouter", "LMStudio"
+            "Ollama", "OpenAI", "OpenRouter", "OrcaRouter", "LMStudio"
         };
         public static readonly List<string> NO_CONFIG_APIS = new()
         {
@@ -157,7 +158,7 @@ namespace LiveCaptionsTranslator.apis
                     ]);
                 }
             }
-            
+
             var requestData = LLMRequestDataFactory.Create("Ollama", config.ModelName, messages, config.Temperature);
             requestData.keep_alive = config.keep_alive;
             string jsonContent = JsonSerializer.Serialize(requestData, requestData.GetType());
@@ -308,6 +309,73 @@ namespace LiveCaptionsTranslator.apis
             }
 
             var requestData = LLMRequestDataFactory.Create("OpenRouter", config.ModelName, messages, config.Temperature);
+
+            string jsonContent = JsonSerializer.Serialize(requestData, requestData.GetType());
+            var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+            client.DefaultRequestHeaders.Clear();
+            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {config?.ApiKey}");
+
+            HttpResponseMessage response;
+            try
+            {
+                response = await client.PostAsync(apiUrl, content, token);
+            }
+            catch (OperationCanceledException ex)
+            {
+                if (ex.Message.StartsWith("The request"))
+                    return $"[ERROR] Translation Failed: The request was canceled due to timeout (> 8 seconds), " +
+                           $"please use a faster API or check network connection.";
+                throw;
+            }
+            catch (Exception ex)
+            {
+                return $"[ERROR] Translation Failed: {ex.Message}";
+            }
+
+            if (response.IsSuccessStatusCode)
+            {
+                var responseContent = await response.Content.ReadAsStringAsync();
+                var jsonResponse = JsonSerializer.Deserialize<JsonElement>(responseContent);
+                var output = jsonResponse.GetProperty("choices")[0]
+                                         .GetProperty("message")
+                                         .GetProperty("content")
+                                         .GetString() ?? string.Empty;
+                return RegexPatterns.ModelThinking().Replace(output, "");
+            }
+            else
+                return $"[ERROR] Translation Failed: HTTP Error - {response.StatusCode}";
+        }
+
+        public static async Task<string> OrcaRouter(string text, CancellationToken token = default)
+        {
+            var config = Translator.Setting["OrcaRouter"] as OrcaRouterConfig;
+            string language = OrcaRouterConfig.SupportedLanguages.TryGetValue(
+                Translator.Setting.TargetLanguage, out var langValue) ? langValue : Translator.Setting.TargetLanguage;
+            string apiUrl = "https://api.orcarouter.ai/v1/chat/completions";
+
+            var messages = new List<BaseLLMConfig.Message>
+            {
+                new BaseLLMConfig.Message { role = "system", content = string.Format(Prompt, language) },
+                new BaseLLMConfig.Message { role = "user", content = $"🔤 {text} 🔤" }
+            };
+
+            if (Translator.Setting.ContextAware)
+            {
+                foreach (var entry in Translator.Caption.AwareContexts)
+                {
+                    string translatedText = entry.TranslatedText;
+                    if (translatedText.Contains("[ERROR]") || translatedText.Contains("[WARNING]"))
+                        continue;
+                    translatedText = RegexPatterns.NoticePrefix().Replace(translatedText, "");
+
+                    messages.InsertRange(1, [
+                        new BaseLLMConfig.Message { role = "user", content = $"🔤 {entry.SourceText} 🔤" },
+                        new BaseLLMConfig.Message { role = "assistant", content = $"{translatedText}" }
+                    ]);
+                }
+            }
+
+            var requestData = LLMRequestDataFactory.Create("OrcaRouter", config.ModelName, messages, config.Temperature);
 
             string jsonContent = JsonSerializer.Serialize(requestData, requestData.GetType());
             var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");

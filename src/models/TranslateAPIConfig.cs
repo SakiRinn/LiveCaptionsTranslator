@@ -89,7 +89,7 @@ namespace LiveCaptionsTranslator.models
         private string apiUrl = "http://localhost:11434";
 
         public int keep_alive = 600;
-        
+
         public int Keep_alive
         {
             get => keep_alive;
@@ -162,6 +162,20 @@ namespace LiveCaptionsTranslator.models
     }
 
     public class OpenRouterConfig : BaseLLMConfig
+    {
+        private string apiKey = "";
+        public string ApiKey
+        {
+            get => apiKey;
+            set
+            {
+                apiKey = value;
+                OnPropertyChanged();
+            }
+        }
+    }
+
+    public class OrcaRouterConfig : BaseLLMConfig
     {
         private string apiKey = "";
         public string ApiKey

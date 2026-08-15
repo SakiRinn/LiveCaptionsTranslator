@@ -13,6 +13,7 @@ namespace LiveCaptionsTranslator.apis
             ["Anthropic"] = typeof(AnthropicRequestData),
             ["Ollama"] = typeof(OllamaRequestData),
             ["OpenRouter"] = typeof(OpenRouterRequestData),
+            ["OrcaRouter"] = typeof(BaseLLMRequestData),
             ["OpenAI"] = typeof(OpenAIRequestData),
             ["XAI"] = typeof(XAIRequestData),
             ["base"] = typeof(BaseLLMRequestData)

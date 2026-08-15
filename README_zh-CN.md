@@ -72,6 +72,7 @@ Windows内置的实时字幕简单易用，资源占用少，且识别准确率�
   | [Ollama](https://ollama.com)                        | 基于LLM | 自托管  |
   | OpenAI兼容API                                         | 基于LLM | 在线   |
   | [OpenRouter](https://openrouter.ai)                 | 基于LLM | 在线   |
+  | [OrcaRouter](https://www.orcarouter.ai)             | 基于LLM | 在线   |
   | 谷歌翻译                                                | 传统翻译  | 在线   |
   | DeepL                                               | 传统翻译  | 在线   |
   | 有道翻译                                                | 传统翻译  | 在线   |
