@@ -4,6 +4,9 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Security.Cryptography;
+using System.Collections.Concurrent;
+using System.Net.Http.Headers;
+
 
 using LiveCaptionsTranslator.models;
 using LiveCaptionsTranslator.utils;
@@ -48,83 +51,374 @@ namespace LiveCaptionsTranslator.apis
         {
             Timeout = TimeSpan.FromSeconds(8)
         };
-        private static int openai_fallback_index = 0;
 
-        public static async Task<string> OpenAI(string text, CancellationToken token = default)
+        private static readonly HttpClient openAIClient = new()
         {
-            var config = Translator.Setting["OpenAI"] as OpenAIConfig;
-            string language = OpenAIConfig.SupportedLanguages.TryGetValue(
-                Translator.Setting.TargetLanguage, out var langValue) ? langValue : Translator.Setting.TargetLanguage;
+            Timeout = System.Threading.Timeout.InfiniteTimeSpan
+        };
 
-            var messages = new List<BaseLLMConfig.Message>
+        private static readonly ConcurrentDictionary<string, int>
+            // This dictionary is used to store the fallback index for each OpenAI API URL.
+            openAIFallbackIndexByUrl = new(StringComparer.OrdinalIgnoreCase);
+
+        private const int OPENAI_TOTAL_TIMEOUT_SECONDS = 8;     // The total timeout for the entire OpenAI request, including retries and delays.
+        private const int OPENAI_MAX_TRANSIENT_RETRIES = 2;     // This index is used to select the fallback model in case of transient errors.
+
+
+        private static bool IsOfficialOpenAIEndpoint(Uri endpoint)
+        {
+            string host = endpoint.Host;
+
+            return host.Equals(
+                       "api.openai.com",
+                       StringComparison.OrdinalIgnoreCase) ||
+                   host.EndsWith(
+                       ".api.openai.com",
+                       StringComparison.OrdinalIgnoreCase);
+        }
+
+        private static bool IsTransientOpenAIFailure(
+            HttpStatusCode statusCode,
+            string responseBody)
+        {
+            if (statusCode == HttpStatusCode.TooManyRequests)
             {
-                new BaseLLMConfig.Message { role = "system", content = string.Format(Prompt, language) },
-                new BaseLLMConfig.Message { role = "user", content = $"🔤 {text} 🔤" }
-            };
+                // These 429 errors cannot be fixed by retrying the request.
+                return !responseBody.Contains(
+                           "credit_balance_exhausted",
+                           StringComparison.OrdinalIgnoreCase) &&
+                       !responseBody.Contains(
+                           "spend_limit",
+                           StringComparison.OrdinalIgnoreCase) &&
+                       !responseBody.Contains(
+                           "usage_limit",
+                           StringComparison.OrdinalIgnoreCase);
+            }
+
+            int code = (int)statusCode;
+
+            return statusCode == HttpStatusCode.RequestTimeout ||
+                   code is 500 or 502 or 503 or 504;
+        }
+
+        private static TimeSpan GetOpenAIRetryDelay(
+            HttpResponseMessage? response,
+            int retryNumber)
+        {
+            TimeSpan delay = TimeSpan.FromMilliseconds(
+                150 * Math.Pow(2, retryNumber));
+
+            if (response?.Headers.RetryAfter?.Delta is TimeSpan retryAfter)
+            {
+                delay = retryAfter;
+            }
+            else if (response?.Headers.RetryAfter?.Date is DateTimeOffset retryDate)
+            {
+                delay = retryDate - DateTimeOffset.UtcNow;
+            }
+
+            if (delay < TimeSpan.Zero)
+                delay = TimeSpan.Zero;
+
+            // In live subtitles, it's not convenient to wait for too long.
+            return delay > TimeSpan.FromSeconds(2)
+                ? TimeSpan.FromSeconds(2)
+                : delay;
+        }
+
+        private static string GetOpenAIError(
+            HttpStatusCode statusCode,
+            string responseBody)
+        {
+            string detail = responseBody.Trim();
+
+            try
+            {
+                using var document = JsonDocument.Parse(responseBody);
+
+                if (document.RootElement.TryGetProperty("error", out var error) &&
+                    error.TryGetProperty("message", out var message))
+                {
+                    detail = message.GetString() ?? detail;
+                }
+            }
+            catch (JsonException)
+            {
+                // Some compatible endpoints won't return JSON. We'll just use the raw response body as the error detail.
+            }
+
+            if (string.IsNullOrWhiteSpace(detail))
+                detail = "The server returned no error details.";
+
+            if (detail.Length > 500)
+                detail = detail[..500] + "...";
+
+            return $"[ERROR] Translation Failed: HTTP Error - " +
+                   $"{statusCode}: {detail}";
+        }
+
+
+
+
+        public static async Task<string> OpenAI(string text, CancellationToken token = default){
+            var config = Translator.Setting["OpenAI"] as OpenAIConfig;
+
+            if (config == null)
+                return "[ERROR] Translation Failed: OpenAI configuration not found.";
+
+            if (string.IsNullOrWhiteSpace(config.ApiKey))
+                return "[ERROR] Translation Failed: OpenAI API key is missing.";
+
+            if (string.IsNullOrWhiteSpace(config.ModelName))
+                return "[ERROR] Translation Failed: OpenAI model name is missing.";
+
+            string apiUrl = TextUtil.NormalizeUrl(config.ApiUrl);
+
+            if (!Uri.TryCreate(apiUrl, UriKind.Absolute, out var endpoint) ||
+                (endpoint.Scheme != Uri.UriSchemeHttps &&
+                 endpoint.Scheme != Uri.UriSchemeHttp))
+            {
+                return "[ERROR] Translation Failed: Invalid OpenAI API URL.";
+            }
+
+            bool isOfficialOpenAI = IsOfficialOpenAIEndpoint(endpoint);
+
+            string language = OpenAIConfig.SupportedLanguages.TryGetValue(
+                Translator.Setting.TargetLanguage,
+                out var langValue)
+                    ? langValue
+                    : Translator.Setting.TargetLanguage;
+
+            var messages = new List<BaseLLMConfig.Message>{
+                            new BaseLLMConfig.Message
+                            {
+                                role = "system",
+                                content = string.Format(Prompt, language)
+                            },
+                            new BaseLLMConfig.Message
+                            {
+                                role = "user",
+                                content = $"🔤 {text} 🔤"
+                            }
+                        };
+
             if (Translator.Setting.ContextAware)
             {
                 foreach (var entry in Translator.Caption.DisplayLogCards)
                 {
                     string translatedText = entry.TranslatedText;
-                    if (translatedText.Contains("[ERROR]") || translatedText.Contains("[WARNING]"))
-                        continue;
-                    translatedText = RegexPatterns.NoticePrefix().Replace(translatedText, "");
 
-                    messages.InsertRange(1, [
-                        new BaseLLMConfig.Message { role = "user", content = $"🔤 {entry.SourceText} 🔤" },
-                        new BaseLLMConfig.Message { role = "assistant", content = $"{translatedText}" }
-                    ]);
+                    if (translatedText.Contains("[ERROR]") ||
+                        translatedText.Contains("[WARNING]"))
+                    {
+                        continue;
+                    }
+
+                    translatedText = RegexPatterns.NoticePrefix()
+                        .Replace(translatedText, "");
+
+                    messages.InsertRange(
+                        1,
+                        [
+                            new BaseLLMConfig.Message
+                {
+                    role = "user",
+                    content = $"🔤 {entry.SourceText} 🔤"
+                },
+                new BaseLLMConfig.Message
+                {
+                    role = "assistant",
+                    content = translatedText
+                }
+                        ]);
                 }
             }
 
-            client.DefaultRequestHeaders.Clear();
-            client.DefaultRequestHeaders.Add("Authorization", $"Bearer {config.ApiKey}");
+            int fallbackCount = LLMRequestDataFactory.FallbackCount;
 
-            HttpResponseMessage response;
+            int fallbackIndex = isOfficialOpenAI
+                ? 0
+                : openAIFallbackIndexByUrl.GetOrAdd(apiUrl, 0);
+
+            if (fallbackIndex < 0 || fallbackIndex >= fallbackCount)
+                fallbackIndex = 0;
+
+            int maximumSchemas = isOfficialOpenAI ? 1 : fallbackCount;
+            int schemasTried = 0;
+            int transientRetries = 0;
+
+            string lastError =
+                "[ERROR] Translation Failed: No compatible request format found.";
+
+            using var timeoutSource =
+                CancellationTokenSource.CreateLinkedTokenSource(token);
+
+            timeoutSource.CancelAfter(
+                TimeSpan.FromSeconds(OPENAI_TOTAL_TIMEOUT_SECONDS));
+
+            CancellationToken requestToken = timeoutSource.Token;
+
             try
             {
-                while (true)
+                while (schemasTried < maximumSchemas)
                 {
-                    var requestData = LLMRequestDataFactory.Create(openai_fallback_index,
-                        config.ModelName, messages, config.Temperature);
-                    string jsonContent = JsonSerializer.Serialize(requestData, requestData.GetType());
-                    var content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+                    requestToken.ThrowIfCancellationRequested();
 
-                    response = await client.PostAsync(TextUtil.NormalizeUrl(config.ApiUrl), content, token);
-                    if (response.StatusCode != HttpStatusCode.BadRequest &&
-                        response.StatusCode != HttpStatusCode.UnprocessableEntity)
-                        break;
-                    Thread.Sleep(15);
+                    object requestData;
 
-                    openai_fallback_index++;
-                    if (openai_fallback_index >= LLMRequestDataFactory.FallbackCount)
+                    if (isOfficialOpenAI)
                     {
-                        openai_fallback_index = 0;
-                        break;
+                        // Specific body for POST /v1/chat/completions.
+                        requestData = new
+                        {
+                            model = config.ModelName,
+                            messages,
+                            temperature = config.Temperature,
+                            max_completion_tokens = 256,
+                            reasoning_effort = "none",
+                            stream = false
+                        };
+                    }
+                    else
+                    {
+                        // Preserves the original mechanism for compatible APIs.
+                        requestData = LLMRequestDataFactory.Create(
+                            fallbackIndex,
+                            config.ModelName,
+                            messages,
+                            config.Temperature);
+                    }
+
+                    string jsonContent = JsonSerializer.Serialize(
+                        requestData,
+                        requestData.GetType());
+
+                    using var request = new HttpRequestMessage(
+                        HttpMethod.Post,
+                        endpoint);
+
+                    request.Headers.Authorization =
+                        new AuthenticationHeaderValue(
+                            "Bearer",
+                            config.ApiKey);
+
+                    request.Content = new StringContent(
+                        jsonContent,
+                        Encoding.UTF8,
+                        "application/json");
+
+                    HttpResponseMessage response;
+
+                    try
+                    {
+                        response = await openAIClient.SendAsync(
+                            request,
+                            HttpCompletionOption.ResponseContentRead,
+                            requestToken);
+                    }
+                    catch (HttpRequestException)
+                        when (transientRetries < OPENAI_MAX_TRANSIENT_RETRIES)
+                    {
+                        TimeSpan delay = GetOpenAIRetryDelay(
+                            null,
+                            transientRetries);
+
+                        transientRetries++;
+
+                        await Task.Delay(delay, requestToken);
+                        continue;
+                    }
+
+                    using (response)
+                    {
+                        string responseBody =
+                            await response.Content.ReadAsStringAsync(requestToken);
+
+                        if (response.IsSuccessStatusCode)
+                        {
+                            if (!isOfficialOpenAI)
+                            {
+                                openAIFallbackIndexByUrl[apiUrl] =
+                                    fallbackIndex;
+                            }
+
+                            var responseObject =
+                                JsonSerializer.Deserialize<OpenAIConfig.Response>(
+                                    responseBody);
+
+                            string? output = responseObject?
+                                .choices?
+                                .FirstOrDefault()?
+                                .message?
+                                .content;
+
+                            if (string.IsNullOrWhiteSpace(output))
+                            {
+                                return "[ERROR] Translation Failed: " +
+                                       "Unexpected OpenAI response format.";
+                            }
+
+                            return RegexPatterns.ModelThinking()
+                                .Replace(output, "");
+                        }
+
+                        lastError = GetOpenAIError(
+                            response.StatusCode,
+                            responseBody);
+
+                        if (IsTransientOpenAIFailure(
+                                response.StatusCode,
+                                responseBody) &&
+                            transientRetries < OPENAI_MAX_TRANSIENT_RETRIES)
+                        {
+                            TimeSpan delay = GetOpenAIRetryDelay(
+                                response,
+                                transientRetries);
+
+                            transientRetries++;
+
+                            await Task.Delay(delay, requestToken);
+                            continue;
+                        }
+
+                        bool shouldTryAnotherSchema =
+                            !isOfficialOpenAI &&
+                            (response.StatusCode == HttpStatusCode.BadRequest ||
+                             response.StatusCode ==
+                                 HttpStatusCode.UnprocessableEntity);
+
+                        if (!shouldTryAnotherSchema)
+                            return lastError;
+
+                        schemasTried++;
+
+                        if (schemasTried >= maximumSchemas)
+                            break;
+
+                        fallbackIndex =
+                            (fallbackIndex + 1) % fallbackCount;
+
+                        transientRetries = 0;
                     }
                 }
+
+                return lastError;
             }
-            catch (OperationCanceledException ex)
+            catch (OperationCanceledException)
+                when (!token.IsCancellationRequested)
             {
-                if (ex.Message.StartsWith("The request"))
-                    return $"[ERROR] Translation Failed: The request was canceled due to timeout (> 8 seconds), " +
-                           $"please use a faster API or check network connection.";
+                return "[ERROR] Translation Failed: " +
+                       "The complete request exceeded 8 seconds.";
+            }
+            catch (OperationCanceledException)
+            {
+                // Obsolete translation canceled by TranslationTaskQueue.
                 throw;
             }
             catch (Exception ex)
             {
                 return $"[ERROR] Translation Failed: {ex.Message}";
             }
-
-            if (response.IsSuccessStatusCode)
-            {
-                string responseString = await response.Content.ReadAsStringAsync();
-                var responseObj = JsonSerializer.Deserialize<OpenAIConfig.Response>(responseString);
-                var output = responseObj.choices[0].message.content;
-                return RegexPatterns.ModelThinking().Replace(output, "");
-            }
-            else
-                return $"[ERROR] Translation Failed: HTTP Error - {response.StatusCode}";
         }
 
         public static async Task<string> Ollama(string text, CancellationToken token = default)
